@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Índice de disco</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#272b35; --txt:#e6e8ee; --mut:#8b93a5; --acc:#4c8dff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  h1 { font-size:17px; margin:0 12px 0 0; }
+  input, select, button { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; }
+  button { cursor:pointer; } button:hover { border-color:var(--acc); }
+  button.pri { background:var(--acc); border-color:var(--acc); color:#fff; }
+  #q { flex:1; min-width:180px; }
+  main { padding:16px; max-width:1000px; margin:auto; }
+  #crumbs { color:var(--mut); margin-bottom:10px; word-break:break-all; }
+  #crumbs a { color:var(--acc); cursor:pointer; text-decoration:none; }
+  #status { color:var(--mut); font-size:13px; margin-bottom:10px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.r { text-align:right; color:var(--mut); white-space:nowrap; }
+  .dir { color:var(--acc); cursor:pointer; }
+  .p { color:var(--mut); font-size:12px; word-break:break-all; }
+  dialog { background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:12px; width:min(620px,94vw); padding:18px; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  dialog label { display:block; color:var(--mut); font-size:13px; margin:12px 0 4px; }
+  dialog input { width:100%; }
+  .row { display:flex; gap:8px; } .row input { flex:1; }
+  #picker { border:1px solid var(--line); border-radius:8px; margin-top:10px; max-height:240px; overflow:auto; background:var(--card); }
+  #picker div { padding:7px 10px; border-bottom:1px solid var(--line); cursor:pointer; word-break:break-all; }
+  #picker div:hover { background:#20242e; }
+  #picker .cur { color:var(--mut); cursor:default; font-size:12px; }
+  .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
+  .known { color:var(--mut); font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📀 Índice de disco</h1>
+  <input id="q" placeholder="Buscar archivo o carpeta…">
+  <select id="disk"></select>
+  <button id="go">Buscar</button>
+  <button id="scan" class="pri">Escanear…</button>
+  <button id="key">API key</button>
+</header>
+<main>
+  <div id="crumbs"></div>
+  <div id="status"></div>
+  <table id="rows"></table>
+</main>
+
+<dialog id="dlg">
+  <strong>Escanear una ruta</strong>
+  <div class="known">La ruta es la que ve <b>este servidor</b> (ej: <code>D:\Datos</code>, <code>E:\</code> o <code>\\NAS\fotos</code>).</div>
+  <label>Ruta</label>
+  <div class="row"><input id="path" placeholder="D:\"><button id="browse">Examinar…</button></div>
+  <div id="picker" hidden></div>
+  <label>Nombre del disco (opcional)</label>
+  <input id="name" placeholder="Ej: Disco Fotos 2TB">
+  <div class="known" id="known"></div>
+  <div class="actions">
+    <button id="rescanAll">Re-escanear todos los guardados</button>
+    <button id="close">Cerrar</button>
+    <button id="doScan" class="pri">Escanear esta ruta</button>
+  </div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const getKey = () => localStorage.getItem('diskIndexKey') || '';
+$('key').onclick = () => {
+  const k = prompt('API key:', getKey());
+  if (k !== null) { localStorage.setItem('diskIndexKey', k.trim()); init(); }
+};
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, { ...opts, headers: { 'x-api-key': getKey(), 'Content-Type': 'application/json' } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+function setStatus(t) { $('status').textContent = t; }
+const fmtDate = (s) => (s ? new Date(s).toLocaleDateString('es-AR') : '');
+let disksInfo = [];
+
+function render(items, showPath) {
+  const t = $('rows');
+  t.innerHTML = '';
+  for (const it of items) {
+    const tr = document.createElement('tr');
+    const c1 = document.createElement('td');
+    const name = document.createElement('div');
+    name.textContent = (it.type === 'folder' ? '📁 ' : '📄 ') + it.name;
+    if (it.type === 'folder') { name.className = 'dir'; name.onclick = () => browse(it.path); }
+    c1.appendChild(name);
+    if (showPath) { const p = document.createElement('div'); p.className = 'p'; p.textContent = it.path; c1.appendChild(p); }
+    const c2 = document.createElement('td'); c2.className = 'r';
+    c2.textContent = it.type === 'folder' ? `${it.files_inside} arch. · ${it.size_human}` : it.size_human;
+    const c3 = document.createElement('td'); c3.className = 'r'; c3.textContent = fmtDate(it.modified);
+    tr.append(c1, c2, c3);
+    t.appendChild(tr);
+  }
+}
+
+function crumbs(path) {
+  const el = $('crumbs');
+  el.innerHTML = '';
+  const root = document.createElement('a'); root.textContent = $('disk').value || 'disco'; root.onclick = () => browse('');
+  el.appendChild(root);
+  let acc = '';
+  for (const part of path.split('/').filter(Boolean)) {
+    acc = acc ? acc + '/' + part : part;
+    const target = acc;
+    el.appendChild(document.createTextNode(' / '));
+    const a = document.createElement('a'); a.textContent = part; a.onclick = () => browse(target);
+    el.appendChild(a);
+  }
+}
+
+async function browse(path) {
+  try {
+    const d = $('disk').value;
+    const j = await api(`/list?disk=${encodeURIComponent(d)}&path=${encodeURIComponent(path)}&limit=1000`);
+    crumbs(path); render(j.items, false);
+    setStatus(`${j.total} elementos`);
+  } catch (e) { setStatus('Error: ' + e.message); }
+}
+
+async function search() {
+  const q = $('q').value.trim();
+  if (!q) return browse('');
+  try {
+    const d = $('disk').value;
+    const j = await api(`/search?q=${encodeURIComponent(q)}&disk=${encodeURIComponent(d)}&limit=200`);
+    $('crumbs').textContent = `Resultados para "${q}"`;
+    render(j.results, true);
+    setStatus(`${j.total} resultados${j.total > j.returned ? ' (mostrando ' + j.returned + ')' : ''}`);
+  } catch (e) { setStatus('Error: ' + e.message); }
+}
+
+$('go').onclick = search;
+$('q').onkeydown = (e) => { if (e.key === 'Enter') search(); };
+$('disk').onchange = () => browse('');
+
+// ---------- diálogo de escaneo ----------
+$('scan').onclick = () => {
+  if (!getKey()) return setStatus('Cargá tu API key con el botón "API key".');
+  $('known').textContent = disksInfo.length
+    ? 'Guardados: ' + disksInfo.map((d) => `${d.disk} → ${d.root || '?'}`).join(' · ')
+    : '';
+  $('dlg').showModal();
+};
+$('close').onclick = () => $('dlg').close();
+
+async function openPicker(p) {
+  const box = $('picker');
+  try {
+    const j = await api('/fs?path=' + encodeURIComponent(p || ''));
+    box.hidden = false; box.innerHTML = '';
+    const cur = document.createElement('div'); cur.className = 'cur';
+    cur.textContent = j.path ? 'Carpeta actual: ' + j.path + ' (tocá "Usar esta carpeta")' : 'Unidades disponibles';
+    box.appendChild(cur);
+    if (j.path) {
+      const use = document.createElement('div'); use.textContent = '✔ Usar esta carpeta';
+      use.onclick = () => { $('path').value = j.path; box.hidden = true; };
+      box.appendChild(use);
+      const up = document.createElement('div'); up.textContent = '⬆ Subir';
+      up.onclick = () => openPicker(j.parent || '');
+      box.appendChild(up);
+    }
+    for (const e of j.entries) {
+      const row = document.createElement('div'); row.textContent = '📁 ' + e.name;
+      row.onclick = () => openPicker(e.path);
+      box.appendChild(row);
+    }
+  } catch (e) { box.hidden = false; box.textContent = 'Error: ' + e.message; }
+}
+$('browse').onclick = () => openPicker($('path').value.trim());
+
+async function startScan(body) {
+  try {
+    await api('/scan', { method: 'POST', body: JSON.stringify(body) });
+    $('dlg').close();
+    pollScan();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+$('doScan').onclick = () => {
+  const path = $('path').value.trim();
+  if (!path) return alert('Indicá una ruta.');
+  startScan({ path, disk: $('name').value.trim() || undefined });
+};
+$('rescanAll').onclick = () => startScan({});
+
+async function pollScan() {
+  const s = await api('/scan/status');
+  if (s.running) {
+    setStatus(`Escaneando ${s.disk || ''}… ${s.files || 0} archivos, ${s.dirs || 0} carpetas`);
+    setTimeout(pollScan, 1500);
+  } else {
+    setStatus(s.last_error ? 'Error: ' + s.last_error : 'Escaneo terminado');
+    init(!s.last_error);
+  }
+}
+
+async function init(keepStatus) {
+  if (!getKey()) { setStatus('Cargá tu API key con el botón "API key".'); return; }
+  try {
+    const st = await api('/stats');
+    disksInfo = st.disks;
+    const prev = $('disk').value;
+    const sel = $('disk'); sel.innerHTML = '';
+    for (const d of st.disks) {
+      const o = document.createElement('option'); o.value = d.disk;
+      const when = d.last_scan ? ' · escaneado ' + new Date(d.last_scan).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+      o.textContent = `${d.disk} (${d.files} arch., ${d.size_human}${when})`; sel.appendChild(o);
+    }
+    if (prev && st.disks.some((d) => d.disk === prev)) sel.value = prev;
+    if (!st.disks.length) { setStatus('Todavía no hay datos. Tocá "Escanear…" y elegí una ruta.'); return; }
+    browse('');
+    if (keepStatus) setStatus('Escaneo terminado');
+  } catch (e) { setStatus('Error: ' + e.message); }
+}
+init();
+</script>
+</body>
+</html>
