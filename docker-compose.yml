@@ -16,7 +16,7 @@ services:
       - disk-index-db:/app/db
       # Disco a indexar (solo lectura). El nombre después de /data/ es el nombre del disco.
       # Cambiá la ruta de la izquierda por donde esté montado tu disco en el host.
-      - /mnt/disco1:/data/MiDisco:ro
+      - /mnt/pc-ariel:/data/PC-Ariel:ro
 
 volumes:
   disk-index-db:
