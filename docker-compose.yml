@@ -1,25 +1,22 @@
 services:
   disk-index:
     build: .
+    pull_policy: build
     container_name: disk-index
     restart: unless-stopped
     ports:
       - "3100:3000"
     environment:
-      - API_KEY=${API_KEY}
+      - API_KEY=${API_KEY:?Falta definir la variable API_KEY en el stack}
       - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-*}
-      # Re-escaneo automático: todos los días a esa hora (o usá AUTO_SCAN_HOURS=24)
       - AUTO_SCAN_TIME=${AUTO_SCAN_TIME:-03:00}
       - TZ=America/Argentina/Buenos_Aires
     volumes:
-      # El índice persiste aunque el disco esté desconectado
+      # El indice persiste aunque el disco este desconectado
       - disk-index-db:/app/db
-      # Disco a indexar (solo lectura). El nombre después de /data/ es el nombre del disco.
-      # Cambiá la ruta de la izquierda por donde esté montado tu disco en el host.
-      - /mnt/pc-ariel:/data/PC-Ariel:ro
-      - /mnt/srv-d:/data/Disco_D:ro
-      - /mnt/srv-e:/data/Disco_E:ro
-      - /mnt/srv-g:/data/Disco_G:ro
+      # Disco a indexar (solo lectura). Lo que va despues de /data/ es el nombre del disco.
+      # Cambia la ruta de la izquierda por donde esta montado tu disco en el host.
+      - /mnt/disco1:/data/MiDisco:ro
 
 volumes:
   disk-index-db:

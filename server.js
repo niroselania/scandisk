@@ -202,6 +202,28 @@ app.post('/api/scan', (req, res) => {
 
 app.get('/api/scan/status', (req, res) => res.json(scanner.getState()));
 
+// Quitar un disco del indice (no toca los archivos reales, solo borra lo indexado)
+app.delete('/api/disks/:disk', (req, res) => {
+  if (scanner.getState().running) return res.status(409).json({ error: 'Hay un escaneo en curso, espera a que termine' });
+  const disk = req.params.disk;
+  const known = db.prepare('SELECT 1 FROM entries WHERE disk = ? LIMIT 1').get(disk)
+    || db.prepare('SELECT 1 FROM disks WHERE disk = ?').get(disk);
+  if (!known) return res.status(404).json({ error: 'Ese disco no esta en el indice' });
+  const removed = db.transaction(() => {
+    const n = db.prepare('DELETE FROM entries WHERE disk = ?').run(disk).changes;
+    db.prepare('DELETE FROM disks WHERE disk = ?').run(disk);
+    db.prepare('DELETE FROM scans WHERE disk = ?').run(disk);
+    return n;
+  })();
+  const still = scanner.getRoots()[disk];
+  res.json({
+    removed_entries: removed,
+    warning: still
+      ? `La carpeta ${still} sigue montada en /data: si no sacas ese volumen del docker-compose, el disco volvera a aparecer en el proximo escaneo.`
+      : null,
+  });
+});
+
 // ---------- escaneo automático ----------
 // AUTO_SCAN_TIME=03:00  -> todos los días a esa hora (hora local del servidor/contenedor)
 // AUTO_SCAN_HOURS=24    -> cada N horas

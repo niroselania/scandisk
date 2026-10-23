@@ -43,6 +43,7 @@
   <select id="disk"></select>
   <button id="go">Buscar</button>
   <button id="scan" class="pri">Escanear…</button>
+  <button id="del">Quitar disco</button>
   <button id="key">API key</button>
 </header>
 <main>
@@ -140,6 +141,18 @@ async function search() {
     setStatus(`${j.total} resultados${j.total > j.returned ? ' (mostrando ' + j.returned + ')' : ''}`);
   } catch (e) { setStatus('Error: ' + e.message); }
 }
+
+$('del').onclick = async () => {
+  const d = $('disk').value;
+  if (!d) return setStatus('No hay ningun disco seleccionado.');
+  if (!confirm(`Quitar "${d}" del indice?\n\nNo se borra ningun archivo real: solo se elimina lo indexado.`)) return;
+  try {
+    const j = await api('/disks/' + encodeURIComponent(d), { method: 'DELETE' });
+    if (j.warning) alert(j.warning);
+    await init();
+    setStatus(`"${d}" quitado del indice (${j.removed_entries} elementos).`);
+  } catch (e) { setStatus('Error: ' + e.message); }
+};
 
 $('go').onclick = search;
 $('q').onkeydown = (e) => { if (e.key === 'Enter') search(); };
