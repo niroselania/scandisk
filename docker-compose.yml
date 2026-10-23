@@ -16,7 +16,9 @@ services:
       - disk-index-db:/app/db
       # Disco a indexar (solo lectura). Lo que va despues de /data/ es el nombre del disco.
       # Cambia la ruta de la izquierda por donde esta montado tu disco en el host.
-      - /mnt/disco1:/data/MiDisco:ro
+      - /mnt/srv-d:/data/Disco_D:ro
+      - /mnt/srv-e:/data/Disco_E:ro
+      - /mnt/srv-g:/data/Disco_G:ro
 
 volumes:
   disk-index-db:
